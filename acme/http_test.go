@@ -15,11 +15,87 @@
 package acme
 
 import (
+	"bytes"
+	"context"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestHTTPReqDecodesJSONMediaTypes(t *testing.T) {
+	for _, contentType := range []string{
+		"application/json",
+		"application/json; charset=utf-8",
+		"application/jose+json",
+		"application/jose+json; charset=utf-8",
+		"Application/JSON",
+		"Application/JOSE+JSON; charset=utf-8",
+		"application/problem+json",
+		"text/example+json",
+	} {
+		t.Run(contentType, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", contentType)
+				w.WriteHeader(http.StatusCreated)
+				w.Write([]byte(`{"status":"valid"}`))
+			}))
+			defer srv.Close()
+
+			var out struct {
+				Status string `json:"status"`
+			}
+			_, err := new(Client).httpReq(context.Background(), http.MethodGet, srv.URL, nil, &out)
+			if err != nil {
+				t.Fatalf("Content-Type %q: %v", contentType, err)
+			}
+			if out.Status != "valid" {
+				t.Errorf("Content-Type %q: expected status 'valid', got %q", contentType, out.Status)
+			}
+		})
+	}
+}
+
+func TestHTTPReqNonJSONMediaTypes(t *testing.T) {
+	tests := []struct {
+		contentType string
+		body        string
+	}{
+		{
+			contentType: "text/plain",
+			body:        `{"status":"valid"}`,
+		},
+		{
+			contentType: "application/pem-certificate-chain",
+			body:        "-----BEGIN CERTIFICATE-----\nexample\n-----END CERTIFICATE-----\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.contentType, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", test.contentType)
+				w.Write([]byte(test.body))
+			}))
+			defer srv.Close()
+
+			_, err := new(Client).httpReq(context.Background(), http.MethodGet, srv.URL, nil, new(Account))
+			if err == nil || !strings.Contains(err.Error(), "target container is not io.Writer") {
+				t.Fatalf("expected non-writer target error, got %v", err)
+			}
+
+			var out bytes.Buffer
+			_, err = new(Client).httpReq(context.Background(), http.MethodGet, srv.URL, nil, &out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != test.body {
+				t.Errorf("expected body %q, got %q", test.body, out.String())
+			}
+		})
+	}
+}
 
 func TestExtractLinks(t *testing.T) {
 	// Original test code by Isaac (https://github.com/eggsampler/acme)

@@ -228,8 +228,8 @@ func (c *Client) httpReq(ctx context.Context, method, endpoint string, joseJSONP
 	// if expecting a body, finally decode it
 	if output != nil {
 		contentType := parseMediaType(resp)
-		switch contentType {
-		case "application/json":
+		switch {
+		case isJSONMediaType(contentType):
 			// unmarshal JSON
 			err = json.Unmarshal(buf.Bytes(), output)
 			if err != nil {
@@ -359,6 +359,13 @@ func extractLinks(resp *http.Response, rel string) []string {
 		}
 	}
 	return links
+}
+
+// isJSONMediaType returns true if mediaType is application/json or has the
+// "+json" structured syntax suffix (RFC 6839 §3.1), ignoring case.
+func isJSONMediaType(mediaType string) bool {
+	mediaType = strings.ToLower(mediaType)
+	return mediaType == "application/json" || strings.HasSuffix(mediaType, "+json")
 }
 
 // parseMediaType returns only the media type from the
